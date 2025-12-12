@@ -1,0 +1,16 @@
+[project]
+name = "semgrep-ghes-util"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12.8"
+dependencies = [
+    "requests>=2.32.5",
+]
+
+[project.scripts]
+semgrep-ghes-util = "semgrep_ghes_util.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

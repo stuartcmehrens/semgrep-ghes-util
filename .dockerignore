@@ -1,0 +1,11 @@
+.git
+.gitignore
+.venv
+__pycache__
+*.pyc
+*.pyo
+.python-version
+CLAUDE.md
+.env
+curl-test.sh
+test.sh
