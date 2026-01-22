@@ -286,3 +286,42 @@ class SemgrepClient:
         )
         data = self._handle_response(response)
         return self._parse_scm_config(data["config"])
+
+    def patch_scm_config(
+        self,
+        config_id: str,
+        subscribe: bool | None = None,
+        auto_scan: bool | None = None,
+        use_network_broker: bool | None = None,
+        diff_enabled: bool | None = None,
+    ) -> ScmConfig:
+        """Update an existing SCM config.
+
+        PATCH /api/scm/deployments/{deploymentId}/configs/{configId}
+
+        Args:
+            config_id: The config ID to update
+            subscribe: Whether to auto-subscribe to webhooks
+            auto_scan: Whether to enable auto-scanning
+            use_network_broker: Whether to use network broker
+            diff_enabled: Whether to enable diff scanning (within auto_scan_settings)
+
+        Only fields that are not None will be included in the update.
+        """
+        body: dict = {}
+
+        if subscribe is not None:
+            body["subscribe"] = subscribe
+        if auto_scan is not None:
+            body["autoScan"] = auto_scan
+        if use_network_broker is not None:
+            body["useNetworkBroker"] = use_network_broker
+        if diff_enabled is not None:
+            body["autoScanSettings"] = {"diffEnabled": diff_enabled}
+
+        response = self.session.patch(
+            f"{self.BASE_URL}/scm/deployments/{self.deployment.id}/configs/{config_id}",
+            json=body,
+        )
+        data = self._handle_response(response)
+        return self._parse_scm_config(data["config"])

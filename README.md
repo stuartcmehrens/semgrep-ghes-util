@@ -73,6 +73,35 @@ Alternatively, create configs without token reuse (uses `GHES_TOKEN` for each or
 uv run semgrep-ghes-util --ghes-url https://github.example.com scm create-missing-configs
 ```
 
+### Updating SCM configs
+
+Bulk update SCM configs matching a GHES URL. Only the properties you specify will be updated.
+
+**Available properties:**
+
+| Flag | Description |
+|------|-------------|
+| `--subscribe` | Subscribe to webhooks (true/false) |
+| `--auto-scan` | Enable auto-scanning (true/false) |
+| `--use-network-broker` | Use network broker (true/false) |
+| `--diff-enabled` | Enable diff scanning (true/false) |
+
+**Examples:**
+
+```bash
+# Preview what would be updated (dry-run)
+uv run semgrep-ghes-util --ghes-url https://github.example.com scm update-configs --subscribe true --dry-run
+
+# Update all configs for the GHES instance
+uv run semgrep-ghes-util --ghes-url https://github.example.com scm update-configs --subscribe true
+
+# Update specific orgs only
+uv run semgrep-ghes-util --ghes-url https://github.example.com scm update-configs --orgs org1 org2 --auto-scan true
+
+# Update multiple properties at once
+uv run semgrep-ghes-util --ghes-url https://github.example.com scm update-configs --subscribe true --auto-scan false --diff-enabled true
+```
+
 ## Docker
 
 ```bash

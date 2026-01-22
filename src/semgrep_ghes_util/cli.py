@@ -1,11 +1,22 @@
 import argparse
 import os
 import sys
+import time
 
 from dotenv import load_dotenv
 
 from semgrep_ghes_util.clients.github_client import GithubClient
 from semgrep_ghes_util.clients.semgrep_client import ScmType, SemgrepClient
+
+
+def parse_bool(value: str) -> bool:
+    """Parse a boolean string value."""
+    if value.lower() in ("true", "1", "yes"):
+        return True
+    elif value.lower() in ("false", "0", "no"):
+        return False
+    else:
+        raise argparse.ArgumentTypeError(f"Invalid boolean value: {value}. Use 'true' or 'false'.")
 
 
 def get_env_or_exit(var_name: str) -> str:
@@ -220,7 +231,7 @@ def cmd_scm_create_missing_configs(args: argparse.Namespace) -> None:
     created = 0
     failed = 0
 
-    for org in orgs_to_create:
+    for i, org in enumerate(orgs_to_create):
         try:
             if args.scm_id:
                 # Reuse token from specified config
@@ -246,8 +257,92 @@ def cmd_scm_create_missing_configs(args: argparse.Namespace) -> None:
             print(f"  ✗ Failed: {org.login} - {e}")
             failed += 1
 
+        # Delay between requests (skip after last one)
+        if args.delay > 0 and i < len(orgs_to_create) - 1:
+            time.sleep(args.delay)
+
     print()
     print(f"Done. Created: {created}, Failed: {failed}")
+
+
+def cmd_scm_update_configs(args: argparse.Namespace) -> None:
+    """Update Semgrep SCM configs matching the GHES URL."""
+    semgrep_token = get_env_or_exit("SEMGREP_APP_TOKEN")
+
+    print(f"GHES: {args.ghes_url}\n")
+
+    semgrep_client = SemgrepClient(semgrep_token)
+
+    # Get all configs and filter by GHES URL
+    all_configs = semgrep_client.list_scm_configs()
+    normalized_ghes_url = args.ghes_url.rstrip("/").lower()
+    matching_configs = [
+        config for config in all_configs
+        if config.base_url and config.base_url.rstrip("/").lower() == normalized_ghes_url
+    ]
+
+    # Optionally filter by org names
+    if args.orgs:
+        org_names_lower = {org.lower() for org in args.orgs}
+        matching_configs = [
+            config for config in matching_configs
+            if config.namespace.lower() in org_names_lower
+        ]
+
+    if not matching_configs:
+        print("No matching SCM configs found.")
+        return
+
+    # Build update payload from provided flags
+    updates: dict[str, bool | None] = {
+        "subscribe": args.subscribe,
+        "auto_scan": args.auto_scan,
+        "use_network_broker": args.use_network_broker,
+        "diff_enabled": args.diff_enabled,
+    }
+
+    # Filter to only non-None values
+    updates_to_apply = {k: v for k, v in updates.items() if v is not None}
+
+    if not updates_to_apply:
+        print("No updates specified. Use flags like --subscribe true to specify updates.")
+        return
+
+    print(f"Found {len(matching_configs)} matching config(s).")
+    print(f"Updates to apply: {updates_to_apply}\n")
+
+    if args.dry_run:
+        print("Dry-run mode - the following configs would be updated:\n")
+        for config in matching_configs:
+            print(f"  {config.namespace} (ID: {config.id})")
+        print(f"\nTotal: {len(matching_configs)} config(s) would be updated.")
+        return
+
+    updated = 0
+    failed = 0
+
+    for i, config in enumerate(matching_configs):
+        try:
+            semgrep_client.patch_scm_config(
+                config_id=config.id,
+                subscribe=args.subscribe,
+                auto_scan=args.auto_scan,
+                use_network_broker=args.use_network_broker,
+                diff_enabled=args.diff_enabled,
+            )
+            print(f"  ✓ Updated: {config.namespace}")
+            updated += 1
+
+        except Exception as e:
+            print(f"  ✗ Failed: {config.namespace} - {e}")
+            failed += 1
+
+        # Delay between requests (skip after last one)
+        if args.delay > 0 and i < len(matching_configs) - 1:
+            time.sleep(args.delay)
+
+    print()
+    print(f"Done. Updated: {updated}, Failed: {failed}")
 
 
 # GHES commands
@@ -347,7 +442,62 @@ def main():
         action="store_true",
         help="Print what would be created without making any changes.",
     )
+    scm_create_missing.add_argument(
+        "--delay",
+        type=float,
+        default=1.0,
+        metavar="SECONDS",
+        help="Delay between creating each config (default: 1.0 seconds).",
+    )
     scm_create_missing.set_defaults(func=cmd_scm_create_missing_configs)
+
+    scm_update_configs = scm_subparsers.add_parser(
+        "update-configs",
+        help="Update SCM configs matching the GHES URL",
+    )
+    scm_update_configs.add_argument(
+        "--orgs",
+        nargs="+",
+        metavar="ORG",
+        help="Specific org names to update (if not provided, updates all matching GHES URL).",
+    )
+    scm_update_configs.add_argument(
+        "--subscribe",
+        type=parse_bool,
+        metavar="BOOL",
+        help="Set subscribe to webhooks (true/false).",
+    )
+    scm_update_configs.add_argument(
+        "--auto-scan",
+        type=parse_bool,
+        metavar="BOOL",
+        help="Set auto-scan enabled (true/false).",
+    )
+    scm_update_configs.add_argument(
+        "--use-network-broker",
+        type=parse_bool,
+        metavar="BOOL",
+        help="Set use network broker (true/false).",
+    )
+    scm_update_configs.add_argument(
+        "--diff-enabled",
+        type=parse_bool,
+        metavar="BOOL",
+        help="Set diff scanning enabled (true/false).",
+    )
+    scm_update_configs.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print what would be updated without making any changes.",
+    )
+    scm_update_configs.add_argument(
+        "--delay",
+        type=float,
+        default=1.0,
+        metavar="SECONDS",
+        help="Delay between updating each config (default: 1.0 seconds).",
+    )
+    scm_update_configs.set_defaults(func=cmd_scm_update_configs)
 
     # GHES command group
     ghes_parser = subparsers.add_parser("ghes", help="GitHub Enterprise Server operations")
@@ -363,7 +513,7 @@ def main():
 
     # Check GHES URL for commands that need it
     needs_ghes_url = args.command == "ghes" or (
-        args.command == "scm" and args.scm_command in ["list-missing-configs", "create-config", "create-missing-configs"]
+        args.command == "scm" and args.scm_command in ["list-missing-configs", "create-config", "create-missing-configs", "update-configs"]
     )
     if needs_ghes_url and not args.ghes_url:
         parser.error("--ghes-url is required (or set GHES_URL environment variable)")
