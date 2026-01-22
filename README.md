@@ -27,13 +27,50 @@ Set the following environment variables (or use a `.env` file):
 uv run semgrep-ghes-util scm list-configs
 
 # List GHES orgs not in Semgrep
-uv run semgrep-ghes-util scm list-missing-configs --ghes-url https://github.example.com
-
-# Create configs for missing orgs
-uv run semgrep-ghes-util scm create-missing-configs --ghes-url https://github.example.com
+uv run semgrep-ghes-util --ghes-url https://github.example.com scm list-missing-configs
 
 # List all GHES organizations
-uv run semgrep-ghes-util ghes list-orgs --ghes-url https://github.example.com
+uv run semgrep-ghes-util --ghes-url https://github.example.com ghes list-orgs
+```
+
+### Creating SCM configs
+
+The recommended workflow for onboarding multiple orgs:
+
+**Step 1: Create a config for one org first**
+
+```bash
+uv run semgrep-ghes-util --ghes-url https://github.example.com scm create-config --org my-first-org
+```
+
+This will output the SCM ID needed for subsequent configs:
+
+```
+Created SCM config for my-first-org
+  ID: 53632
+  SCM ID: 138447
+
+Use --scm-id 138447 with create-missing-configs to reuse this token.
+```
+
+**Step 2: Preview what would be created**
+
+```bash
+uv run semgrep-ghes-util --ghes-url https://github.example.com scm create-missing-configs --dry-run
+```
+
+**Step 3: Create configs for remaining orgs**
+
+Use the `--scm-id` from step 1 to reuse the same token for all remaining orgs:
+
+```bash
+uv run semgrep-ghes-util --ghes-url https://github.example.com scm create-missing-configs --scm-id 138447
+```
+
+Alternatively, create configs without token reuse (uses `GHES_TOKEN` for each org):
+
+```bash
+uv run semgrep-ghes-util --ghes-url https://github.example.com scm create-missing-configs
 ```
 
 ## Docker

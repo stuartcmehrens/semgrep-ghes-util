@@ -2,6 +2,8 @@ import argparse
 import os
 import sys
 
+from dotenv import load_dotenv
+
 from semgrep_ghes_util.clients.github_client import GithubClient
 from semgrep_ghes_util.clients.semgrep_client import ScmType, SemgrepClient
 
@@ -103,6 +105,41 @@ def cmd_scm_list_missing_configs(args: argparse.Namespace) -> None:
         print(f"  {org.login}")
 
 
+def cmd_scm_create_config(args: argparse.Namespace) -> None:
+    """Create a single Semgrep SCM config for one GHES org."""
+    semgrep_token = get_env_or_exit("SEMGREP_APP_TOKEN")
+    ghes_token = get_env_or_exit("GHES_TOKEN")
+
+    print(f"GHES: {args.ghes_url}")
+    print(f"Org: {args.org}\n")
+
+    if args.dry_run:
+        print("Dry-run mode - the following SCM config would be created:\n")
+        print(f"  {args.org}")
+        print(f"      Type: {ScmType.GITHUB_ENTERPRISE.value}")
+        print(f"      URL: {args.ghes_url}")
+        return
+
+    semgrep_client = SemgrepClient(semgrep_token)
+
+    try:
+        config = semgrep_client.create_scm_config(
+            scm_type=ScmType.GITHUB_ENTERPRISE,
+            namespace=args.org,
+            base_url=args.ghes_url,
+            access_token=ghes_token,
+        )
+        print(f"Created SCM config for {args.org}")
+        print(f"  ID: {config.id}")
+        print(f"  SCM ID: {config.scm_id}")
+        print()
+        print(f"Use --scm-id {config.scm_id} with create-missing-configs to reuse this token.")
+
+    except Exception as e:
+        print(f"Failed to create config: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
 def cmd_scm_create_missing_configs(args: argparse.Namespace) -> None:
     """Create Semgrep SCM configs for GHES orgs not yet onboarded."""
     semgrep_token = get_env_or_exit("SEMGREP_APP_TOKEN")
@@ -164,46 +201,43 @@ def cmd_scm_create_missing_configs(args: argparse.Namespace) -> None:
 
         print(f"Creating {len(orgs_to_create)} missing SCM config(s)...\n")
 
-    # Find an existing healthy config to reuse the token from, if enabled and available
-    reuse_config_id: int | None = None
-    if args.reuse_token:
-        # Only reuse from healthy configs
-        healthy_configs = [c for c in existing_configs if c.status and c.status.ok]
-        if healthy_configs and healthy_configs[0].scm_id:
-            reuse_config_id = int(healthy_configs[0].scm_id)
-            print(f"Reusing token from existing config: {healthy_configs[0].namespace} (scm_id: {reuse_config_id})\n")
-        else:
-            if existing_configs:
-                print("No healthy configs to reuse token from - using GHES_TOKEN for first org\n")
-            else:
-                print("No existing configs - using GHES_TOKEN for first org\n")
+    # Dry-run mode: print what would be created and exit
+    if args.dry_run:
+        print("Dry-run mode - the following SCM configs would be created:\n")
+        for org in orgs_to_create:
+            print(f"  {org.login}")
+            print(f"      Type: {ScmType.GITHUB_ENTERPRISE.value}")
+            print(f"      URL: {args.ghes_url}")
+            print()
+        print(f"Total: {len(orgs_to_create)} config(s) would be created.")
+        return
+
+    if args.scm_id:
+        print(f"Using token from SCM ID: {args.scm_id}\n")
     else:
-        print("Token reuse disabled - using GHES_TOKEN for each org\n")
+        print("Using GHES_TOKEN for each org\n")
 
     created = 0
     failed = 0
 
     for org in orgs_to_create:
         try:
-            if reuse_config_id:
-                # Reuse token from existing config
+            if args.scm_id:
+                # Reuse token from specified config
                 semgrep_client.create_scm_config(
                     scm_type=ScmType.GITHUB_ENTERPRISE,
                     namespace=org.login,
                     base_url=args.ghes_url,
-                    scm_config_id=reuse_config_id,
+                    scm_config_id=args.scm_id,
                 )
             else:
                 # Use the GHES token directly
-                config = semgrep_client.create_scm_config(
+                semgrep_client.create_scm_config(
                     scm_type=ScmType.GITHUB_ENTERPRISE,
                     namespace=org.login,
                     base_url=args.ghes_url,
                     access_token=ghes_token,
                 )
-                # If reuse is enabled, use this config's scm_id for subsequent creates
-                if args.reuse_token and config.scm_id:
-                    reuse_config_id = int(config.scm_id)
 
             print(f"  ✓ Created: {org.login}")
             created += 1
@@ -237,6 +271,8 @@ def cmd_ghes_list_orgs(args: argparse.Namespace) -> None:
 
 
 def main():
+    load_dotenv()
+
     parser = argparse.ArgumentParser(
         prog="semgrep-ghes-util",
         description="Tools for managing Semgrep SCM configs with GitHub Enterprise Server",
@@ -266,6 +302,23 @@ def main():
     )
     scm_list_missing.set_defaults(func=cmd_scm_list_missing_configs)
 
+    scm_create_config = scm_subparsers.add_parser(
+        "create-config",
+        help="Create a single SCM config for one GHES org",
+    )
+    scm_create_config.add_argument(
+        "--org",
+        required=True,
+        metavar="ORG",
+        help="Organization name to create config for.",
+    )
+    scm_create_config.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print what would be created without making any changes.",
+    )
+    scm_create_config.set_defaults(func=cmd_scm_create_config)
+
     scm_create_missing = scm_subparsers.add_parser(
         "create-missing-configs",
         help="Create SCM configs for GHES orgs not yet onboarded",
@@ -284,10 +337,15 @@ def main():
         help="File containing org names (one per line).",
     )
     scm_create_missing.add_argument(
-        "--reuse-token",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Reuse token from an existing SCM config for this GHES (default: true). Use --no-reuse-token to use GHES_TOKEN directly for each org.",
+        "--scm-id",
+        type=int,
+        metavar="ID",
+        help="SCM ID of an existing config to reuse token from. Get this from 'scm create-config'.",
+    )
+    scm_create_missing.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print what would be created without making any changes.",
     )
     scm_create_missing.set_defaults(func=cmd_scm_create_missing_configs)
 
@@ -305,7 +363,7 @@ def main():
 
     # Check GHES URL for commands that need it
     needs_ghes_url = args.command == "ghes" or (
-        args.command == "scm" and args.scm_command in ["list-missing-configs", "create-missing-configs"]
+        args.command == "scm" and args.scm_command in ["list-missing-configs", "create-config", "create-missing-configs"]
     )
     if needs_ghes_url and not args.ghes_url:
         parser.error("--ghes-url is required (or set GHES_URL environment variable)")
