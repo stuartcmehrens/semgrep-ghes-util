@@ -40,7 +40,7 @@ The recommended workflow for onboarding multiple orgs:
 **Step 1: Create a config for one org first**
 
 ```bash
-uv run semgrep-ghes-util --ghes-url https://github.example.com scm create-config --org my-first-org
+uv run semgrep-ghes-util --ghes-url https://github.example.com scm create-config --ghes-org my-first-org
 ```
 
 This will output the SCM ID needed for subsequent configs:

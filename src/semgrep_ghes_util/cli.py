@@ -111,11 +111,11 @@ def cmd_scm_create_config(args: argparse.Namespace) -> None:
     ghes_token = get_env_or_exit("GHES_TOKEN")
 
     print(f"GHES: {args.ghes_url}")
-    print(f"Org: {args.org}\n")
+    print(f"Org: {args.ghes_org}\n")
 
     if args.dry_run:
         print("Dry-run mode - the following SCM config would be created:\n")
-        print(f"  {args.org}")
+        print(f"  {args.ghes_org}")
         print(f"      Type: {ScmType.GITHUB_ENTERPRISE.value}")
         print(f"      URL: {args.ghes_url}")
         return
@@ -125,11 +125,11 @@ def cmd_scm_create_config(args: argparse.Namespace) -> None:
     try:
         config = semgrep_client.create_scm_config(
             scm_type=ScmType.GITHUB_ENTERPRISE,
-            namespace=args.org,
+            namespace=args.ghes_org,
             base_url=args.ghes_url,
             access_token=ghes_token,
         )
-        print(f"Created SCM config for {args.org}")
+        print(f"Created SCM config for {args.ghes_org}")
         print(f"  ID: {config.id}")
         print(f"  SCM ID: {config.scm_id}")
         print()
@@ -307,7 +307,7 @@ def main():
         help="Create a single SCM config for one GHES org",
     )
     scm_create_config.add_argument(
-        "--org",
+        "--ghes-org",
         required=True,
         metavar="ORG",
         help="Organization name to create config for.",
