@@ -89,6 +89,18 @@ class ScmTokenScopes:
     read_metadata: bool = False
     read_pull_request: bool = False
     write_pull_request_comment: bool = False
+    read_contents: bool = False
+    read_members: bool = False
+    manage_webhooks: bool = False
+    write_contents: bool = False
+
+
+@dataclass
+class ScmCheckResult:
+    """Result from checking an SCM config's health."""
+
+    status: ScmStatus
+    token_scopes: ScmTokenScopes | None = None
 
 
 @dataclass
@@ -325,3 +337,46 @@ class SemgrepClient:
         )
         data = self._handle_response(response)
         return self._parse_scm_config(data["config"])
+
+    def check_scm_config(self, config_id: str) -> ScmCheckResult:
+        """Check the health of an SCM config.
+
+        GET /api/scm/deployments/{deploymentId}/configs/{configId}/check
+
+        Args:
+            config_id: The config ID to check
+
+        Returns:
+            ScmCheckResult with status and token scopes
+        """
+        response = self.session.get(
+            f"{self.BASE_URL}/scm/deployments/{self.deployment.id}/configs/{config_id}/check",
+        )
+        data = self._handle_response(response)
+
+        status_data = data.get("status", {})
+        checked = None
+        if status_data.get("checked"):
+            checked = datetime.fromisoformat(
+                status_data["checked"].replace("Z", "+00:00")
+            )
+        status = ScmStatus(
+            checked=checked,
+            ok=status_data.get("ok", False),
+            error=status_data.get("error"),
+        )
+
+        token_scopes = None
+        if "tokenScopes" in data:
+            scopes = data["tokenScopes"]
+            token_scopes = ScmTokenScopes(
+                read_metadata=scopes.get("readMetadata", False),
+                read_pull_request=scopes.get("readPullRequest", False),
+                write_pull_request_comment=scopes.get("writePullRequestComment", False),
+                read_contents=scopes.get("readContents", False),
+                read_members=scopes.get("readMembers", False),
+                manage_webhooks=scopes.get("manageWebhooks", False),
+                write_contents=scopes.get("writeContents", False),
+            )
+
+        return ScmCheckResult(status=status, token_scopes=token_scopes)

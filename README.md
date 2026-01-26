@@ -47,7 +47,6 @@ This will output the SCM ID needed for subsequent configs:
 
 ```
 Created SCM config for my-first-org
-  ID: 53632
   SCM ID: 138447
 
 Use --scm-id 138447 with create-missing-configs to reuse this token.

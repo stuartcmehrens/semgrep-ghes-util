@@ -141,7 +141,6 @@ def cmd_scm_create_config(args: argparse.Namespace) -> None:
             access_token=ghes_token,
         )
         print(f"Created SCM config for {args.ghes_org}")
-        print(f"  ID: {config.id}")
         print(f"  SCM ID: {config.scm_id}")
         print()
         print(f"Use --scm-id {config.scm_id} with create-missing-configs to reuse this token.")
@@ -345,6 +344,84 @@ def cmd_scm_update_configs(args: argparse.Namespace) -> None:
     print(f"Done. Updated: {updated}, Failed: {failed}")
 
 
+def cmd_scm_check_configs(args: argparse.Namespace) -> None:
+    """Check the health of SCM configs matching the GHES URL."""
+    semgrep_token = get_env_or_exit("SEMGREP_APP_TOKEN")
+
+    print(f"GHES: {args.ghes_url}\n")
+
+    semgrep_client = SemgrepClient(semgrep_token)
+
+    # Get all configs and filter by GHES URL
+    all_configs = semgrep_client.list_scm_configs()
+    normalized_ghes_url = args.ghes_url.rstrip("/").lower()
+    matching_configs = [
+        config for config in all_configs
+        if config.base_url and config.base_url.rstrip("/").lower() == normalized_ghes_url
+    ]
+
+    # Optionally filter by org names
+    if args.orgs:
+        org_names_lower = {org.lower() for org in args.orgs}
+        matching_configs = [
+            config for config in matching_configs
+            if config.namespace.lower() in org_names_lower
+        ]
+
+    if not matching_configs:
+        print("No matching SCM configs found.")
+        return
+
+    print(f"Checking {len(matching_configs)} config(s)...\n")
+
+    healthy = 0
+    unhealthy = 0
+
+    for i, config in enumerate(matching_configs):
+        try:
+            result = semgrep_client.check_scm_config(config_id=config.id)
+            if result.status.ok:
+                print(f"  ✓ Healthy: {config.namespace}")
+                healthy += 1
+            else:
+                error_msg = result.status.error or "Unknown error"
+                print(f"  ✗ Unhealthy: {config.namespace} - {error_msg}")
+                unhealthy += 1
+
+            # Print details
+            if result.status.checked:
+                print(f"      Last checked: {result.status.checked.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+            if result.token_scopes:
+                scopes = result.token_scopes
+                enabled_scopes = []
+                if scopes.read_metadata:
+                    enabled_scopes.append("read_metadata")
+                if scopes.read_pull_request:
+                    enabled_scopes.append("read_pull_request")
+                if scopes.write_pull_request_comment:
+                    enabled_scopes.append("write_pull_request_comment")
+                if scopes.read_contents:
+                    enabled_scopes.append("read_contents")
+                if scopes.read_members:
+                    enabled_scopes.append("read_members")
+                if scopes.manage_webhooks:
+                    enabled_scopes.append("manage_webhooks")
+                if scopes.write_contents:
+                    enabled_scopes.append("write_contents")
+                print(f"      Token scopes: {', '.join(enabled_scopes) if enabled_scopes else 'none'}")
+
+        except Exception as e:
+            print(f"  ✗ Failed: {config.namespace} - {e}")
+            unhealthy += 1
+
+        # Delay between requests (skip after last one)
+        if args.delay > 0 and i < len(matching_configs) - 1:
+            time.sleep(args.delay)
+
+    print()
+    print(f"Done. Healthy: {healthy}, Unhealthy: {unhealthy}")
+
+
 # GHES commands
 def cmd_ghes_list_orgs(args: argparse.Namespace) -> None:
     """List all organizations on GHES."""
@@ -499,6 +576,25 @@ def main():
     )
     scm_update_configs.set_defaults(func=cmd_scm_update_configs)
 
+    scm_check_configs = scm_subparsers.add_parser(
+        "check-configs",
+        help="Check the health of SCM configs matching the GHES URL",
+    )
+    scm_check_configs.add_argument(
+        "--orgs",
+        nargs="+",
+        metavar="ORG",
+        help="Specific org names to check (if not provided, checks all matching GHES URL).",
+    )
+    scm_check_configs.add_argument(
+        "--delay",
+        type=float,
+        default=0.25,
+        metavar="SECONDS",
+        help="Delay between checking each config (default: 0.25 seconds).",
+    )
+    scm_check_configs.set_defaults(func=cmd_scm_check_configs)
+
     # GHES command group
     ghes_parser = subparsers.add_parser("ghes", help="GitHub Enterprise Server operations")
     ghes_subparsers = ghes_parser.add_subparsers(dest="ghes_command", required=True)
@@ -513,7 +609,7 @@ def main():
 
     # Check GHES URL for commands that need it
     needs_ghes_url = args.command == "ghes" or (
-        args.command == "scm" and args.scm_command in ["list-missing-configs", "create-config", "create-missing-configs", "update-configs"]
+        args.command == "scm" and args.scm_command in ["list-missing-configs", "create-config", "create-missing-configs", "update-configs", "check-configs"]
     )
     if needs_ghes_url and not args.ghes_url:
         parser.error("--ghes-url is required (or set GHES_URL environment variable)")
